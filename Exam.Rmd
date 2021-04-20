@@ -1,0 +1,32 @@
+---
+title: "EXAM"
+author: "Alba"
+date: "4/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+```
+
+```{r}
+
+#PRE-PROCESSING
+
+knitr::opts_chunk$set(echo = TRUE)
+
+df = read_csv("/Users/al/RStudio/Semester 4/Computational modeling for CogSci/EXAM/doi_10/HerrmannThoeniGaechter/HerrmannThoeniGaechterDATA.csv")
+
+#Deleting weird NA rows
+df <- df[-c(1, 2), ]
+
+#Making first row as header
+names(df) <- as.matrix(df[1, ])
+df <- df[-1, ]
+df[] <- lapply(df, function(x) type.convert(as.character(x)))
+df
+
+
+```
+
