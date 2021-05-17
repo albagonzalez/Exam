@@ -1,5 +1,5 @@
 ---
-title: "EXAM"
+title: "Assignment 3- Compmod + Sockult exam"
 author: "Alba"
 date: "4/20/2021"
 output: html_document
@@ -10,30 +10,33 @@ library(tidyverse)
 library(dplyr)
 library(brms)
 library(rethinking)
+library(bayesplot)
 ```
 
+
+### PRE-PROCESSING
+
 ```{r}
-
-#PRE-PROCESSING
-
 knitr::opts_chunk$set(echo = TRUE)
 
 df = read_csv("/Users/al/RStudio👩🏻‍💻/Semester 4/Computational modeling for CogSci/EXAM/Exam/HerrmannThoeniGaechterDATA.csv")
 
-#Deleting weird NA rows
-df <- df[-c(1, 2), ]
+#Deleting NA rows
+
+df <- df[-c(1, 2),]
 
 #Making first row as header
+
 names(df) <- as.matrix(df[1, ])
 df <- df[-1, ]
-df[] <- lapply(df, function(x) type.convert(as.character(x)))
 
 ```
-
 
 ```{r}
 
 #Creating column overall contribution with mean values
+
+df$senderscontribution <- as.numeric(df$senderscontribution)
 
 df2 <- df %>%                                        # Specify data frame
   group_by(subjectid, p) %>%                         # Specify group indicator
@@ -42,26 +45,10 @@ df2 <- df %>%                                        # Specify data frame
 
 df <- merge(x=df, y= df2, by.x= c("subjectid", "p"), by.y = c("subjectid", "p"))
 
-```
 
+#Creating a colum for GEI values
 
-```{r}
-
-#Creating a new dataset with only the variables we will use
-
-df <- subset(df, period = 1, select=c(subjectid, groupid, female, period, senderscontribution, otherscontribution, overall_contr, p, city, punishment, recpun, numknown))
-data <- subset(df, period = 1, select=c(subjectid, GEI, groupid, female, overall_contr, city))
-
-```
-
-```{r}
-
-#CREATING A COLUMN FOR GEI VALUES
-
-#Checking how many different cities are there in the experiment
-unique(df[c("city", "GEI")])
-
-#Creating column for GEI with NAs
+#Creating column with NAs
 df$GEI <- c(NA)
 
 #Mutating GEI column to add GEI values for all countries depending on city column 
@@ -84,125 +71,263 @@ df <- df %>% mutate(GEI =
                            city== "Melbourne"~ 76,
                            ))
 
-#Removing all the duplicate rows of the columns that are selected in the `summarise`
-data <- data %>%
-  group_by(subjectid) %>%
-  summarise(female=female, overall_contr=overall_contr, city=city, GEI=GEI, subjectid=subjectid,groupid=groupid)
 ```
+
+```{r}
+
+#Creating a new dataset with only the variables we will use
+
+df <- subset(df, select=c(subjectid, groupid,female, city, p, overall_contr, GEI, punishment))
+
+#Creating a df and subsetting necessary variables for the second model on punishment and forgiveness
+
+dfpun <- subset(df, select=c(subjectid, groupid,female, city, p, GEI, punishment))
+dfpun$punishment <- as.numeric(dfpun$punishment)
+
+#Deleting all N-experiment data
+
+df<-df[!(df$p=="N-experiment"),]
+dfpun<-dfpun[!(dfpun$p=="N-experiment"),]
+
+
+#Creating a column for overall punishment given to other teammates per participant
+
+df3 <- dfpun %>%                                        # Specify data frame
+  group_by(subjectid) %>%                         # Specify group indicator
+  summarise_at(vars(punishment),              # Specify column
+               list(overall_punishment = sum)) 
+dfpun <- merge(x=dfpun, y= df3, by.x= c("subjectid"), by.y = c("subjectid"))
+
+#Removing duplicate rows in dfpun
+
+dfpun <- subset(dfpun, select=c(subjectid, groupid,female, city, p, GEI, overall_punishment))
+
+dfpun <- distinct(dfpun)
+
+#Creating a new dataset with only the variables we will use
+
+df <- subset(df, select=c(subjectid, groupid,female, city, p, overall_contr, GEI))
+
+#Removing all the duplicate rows
+
+df <- distinct(df)
+
+```
+
+
 
   ##### BAYESIAN WORKFLOW #####
 
 ```{r}
-#Standardizing variables to make priors easier to choose
+#Standardizing variables to make priors easier to set
 
 df= df %>% mutate(
   overall_contr_st = standardize(overall_contr),
   GEI_st = standardize(GEI)
 )
- 
+
+dfpun = dfpun %>% mutate(
+  overall_punishment_st = standardize(overall_punishment),
+  GEI_st = standardize(GEI)
+)
+
 ```
 
   
 ```{r}
-###MODELS
 
-#We use a 1 because we want to compare between genders, whereas a 0 would give us each distribution separately
+  ###  MODEL 1  ###
 
-#Th effect of GEI in a person depends on gender. If you are woman a high gei will affect you negatively while if you are a man it will affect you positively (priviledge wise)
+
+df$female <- as.factor(df$female)
+
 
   #MODEL 1
-m0 <- bf(overall_contr ~ 0 + female + female*GEI + (1| subjectid))
+
 m1 = bf(overall_contr_st ~ 0 + female +(1|subjectid)+(1|GEI_st))
-m2 <- overall_contr ~ GEI*female + (1 | groupid:subjectid) + (1 | subjectid)
+
 
 #Priors
+
 get_prior(m1, family = gaussian, data = df)
 
-#priorOverContrGenderGEI <-c(
-#prior(normal(173, 1), class = b, coef = overall_contr),
-#prior(normal(3, 1), class = b, coef = female0),
-#prior(normal(-3, 1), class = b, coef = female1),
-#prior(normal(6, 2), class = sigma)
-#)
 
-prior_m0 = c(
-  prior(normal(0,1), class = b, coef = female0),
-  prior(normal(0,1), class = b, coef = female1),
-  prior(normal(0,1), class = b, coef = female0:GEI),
-  prior(normal(0,1), class = b, coef = female1:GEI),
-  prior(normal(0.3,0.4), class = sd, group = subjectid),
-  prior(normal(1,0.5), class = sigma)
-)
 prior_m1 = c(
   prior(normal(0,1), class = b, coef = female0),
   prior(normal(0,1), class = b, coef = female1),
-  prior(normal(0,0.2), class = sd, group = subjectid),
-  prior(normal(0,0.2), class = sd, group = GEI_st),
-  prior(normal(1,1), class = sigma)
-)
-
-prior_m2 = c(
-  prior(normal(0,1), class = b, coef = female0),
-  prior(normal(0,1), class = b, coef = female1),
-  prior(normal(0,1), class = b, coef = female0:GEI),
-  prior(normal(0,1), class = b, coef = female1:GEI),
-  prior(normal(0.3,0.4), class = sd, group = groupid:subjectid),
-  prior(normal(0.3,0.4), class = sd, group = subjectid),
+  prior(normal(0,1), class = sd, group = subjectid),
+  prior(normal(0,1), class = sd, group = GEI_st),
   prior(normal(1,0.5), class = sigma)
 )
 
-
-
-m0_prior = brm(
-  fom,
-  m,
-  family = gaussian(),
-  prior = prior_fom,
-  sample_prior = "only")
-
 m1_prior = brm(
-  fom,
-  m,
-  family = gaussian(),
-  prior = prior_fom,
-  sample_prior = "only")
+  m1,
+  df,
+  family = "skew_normal",
+  prior = prior_m1,
+  sample_prior = "only",  
+  file = "prior_m1",
+    control=list(
+    adapt_delta = 0.99,
+    max_treedepth = 20)
+)
 
-m2_prior = brm(
-  fom,
-  m,
-  family = gaussian(),
-  prior = prior_fom,
-  sample_prior = "only")
-  
-#idk what is this?? 
-#priorm1_priorCheck <- brm(m1,df,family=gaussian,prior = prior_m1,sample_prior= "only")
+summary(m1_prior)
+
 
 #Doing prior predictive check    
 
-pp_check(m0_prior, nsamples = 100)
 pp_check(m1_prior, nsamples = 100)
-pp_check(m2_prior, nsamples = 100)
+
 
 #Checking trace and rank plots
-mcmc_trace(meta_model, pars = "b_Intercept")
-mcmc_rank_overlay(meta_model, pars = "b_Intercept")
 
-#Posterior
-posterior <- posterior_samples(meta_model)
-
-#Plotting GEI with overall contribution to see if there is a pattern
-
-ggplot(posterior1)+ geom_density(aes(female), fill="red", alpha = .3)+
-  geom_density(aes(m1_prior), fill = "blue", alpha = .5)+theme_classic()+xlab("B - Prior/posterior")
-
-ggplot(df, aes(x=GEI, y=overall_contr, color=female))+
-  geom_count()
- 
-ggplot(df, aes(x=GEI, y=overall_contr, fill = female))+
-  geom_bar(stat='summary', fun.y = mean, width = 0.5)
-
-
+mcmc_trace(m1_prior, pars = "b_female1")
+mcmc_trace(m1_prior, pars= "b_female0")
+mcmc_rank_overlay(m1_prior, pars = "b_female1")
+mcmc_rank_overlay(m1_prior, pars = "b_female0")
 
 ```
 
 
+
+```{r}
+
+#Posterior checks
+
+m1_post = brm(
+  m1,
+  df,
+  family = "skew_normal",
+  prior = prior_m1,
+  sample_prior = T,  
+  file = "m1",
+    control=list(
+    adapt_delta = 0.99,
+    max_treedepth = 20)
+)
+
+pp_check(m1_post, nsamples = 100)
+
+#Prior-posterior update plots
+
+posterior_m1 = posterior_samples(m1_post)
+
+ggplot(posterior_m1) +
+  theme_classic() +
+  geom_density(aes(b_female1), fill="red", alpha=0.3) +
+  geom_density(aes(prior_b_female1), fill="blue", alpha=0.5)
+
+ggplot(posterior_m1) +
+  theme_classic() +
+  geom_density(aes(b_female0), fill="red", alpha=0.3) +
+  geom_density(aes(prior_b_female0), fill="blue", alpha=0.5)
+
+ggplot(posterior_m1) +
+  theme_classic() +
+  geom_density(aes(posterior$sd_GEI_st__Intercept), fill="red", alpha=0.3) +
+  geom_density(aes(posterior$prior_sd_GEI_st), fill="blue", alpha=0.5)
+
+ggplot(posterior_m1) +
+  theme_classic() +
+  geom_density(aes(posterior$sd_subjectid__Intercept), fill="red", alpha=0.3) +
+  geom_density(aes(posterior$prior_sd_subjectid), fill="blue", alpha=0.5)
+
+ggplot(posterior_m1) +
+  theme_classic() +
+  geom_density(aes(posterior$sigma), fill="red", alpha=0.3) +
+  geom_density(aes(posterior$prior_sigma), fill="blue", alpha=0.5)
+
+
+```
+
+```{r}
+  ###  MODEL 2 ###
+
+dfpun$female <- as.factor(dfpun$female)
+
+m2 = bf(overall_punishment_st ~ 0 + female +(1|subjectid)+(1|GEI_st))
+
+
+get_prior(m2, family = gaussian, data = dfpun)
+
+
+prior_m2 = c(
+  prior(normal(0,1), class = b, coef = female0),
+  prior(normal(0,1), class = b, coef = female1),
+  prior(normal(0,1), class = sd, group = subjectid),
+  prior(normal(0,1), class = sd, group = GEI_st),
+  prior(normal(1,0.5), class = sigma)
+)
+
+m2_prior = brm(
+  m2,
+  dfpun,
+  family = gaussian(),
+  prior = prior_m2,
+  sample_prior = "only",  
+  file = "prior_m2",
+    control=list(
+    adapt_delta = 0.99,
+    max_treedepth = 20)
+)
+
+summary(m2_prior)
+
+pp_check(m2_prior, nsamples = 100)
+
+m2_post = brm(
+  m2,
+  dfpun,
+  family = gaussian(),
+  prior = prior_m2,
+  sample_prior = T,  
+  file = "m2",
+  control=list(
+    adapt_delta = 0.99,
+    max_treedepth = 20),
+  iter= 2500
+)
+
+pp_check(m2_post, nsamples = 100)
+
+#Posterior samples
+
+posterior_m2 = posterior_samples(m2_post)
+
+#Prior posterior update plots
+
+ggplot(posterior_m2) +
+  theme_classic() +
+  geom_density(aes(posterior$sd_GEI_st__Intercept), fill="red", alpha=0.3) +
+  geom_density(aes(posterior$prior_sd_GEI_st), fill="blue", alpha=0.5)
+
+ggplot(posterior_m2) +
+  theme_classic() +
+  geom_density(aes(b_female1), fill="red", alpha=0.3) +
+  geom_density(aes(prior_b_female1), fill="blue", alpha=0.5)
+
+ggplot(posterior_m2) +
+  theme_classic() +
+  geom_density(aes(b_female0), fill="red", alpha=0.3) +
+  geom_density(aes(prior_b_female0), fill="blue", alpha=0.5)
+
+ggplot(posterior_m2) +
+  theme_classic() +
+  geom_density(aes(posterior$sd_subjectid__Intercept), fill="red", alpha=0.3) +
+  geom_density(aes(posterior$prior_sd_subjectid), fill="blue", alpha=0.5)
+
+ggplot(posterior_m2) +
+  theme_classic() +
+  geom_density(aes(sigma), fill="red", alpha=0.3) +
+  geom_density(aes(prior_sigma), fill="blue", alpha=0.5)
+
+#Rank and trace plots
+
+mcmc_trace(m2_prior, pars = "b_female1")
+mcmc_trace(m2_prior, pars= "b_female0")
+mcmc_rank_overlay(m2_prior, pars = "b_female1")
+mcmc_rank_overlay(m2_prior, pars = "b_female0")
+
+``` 
+  
