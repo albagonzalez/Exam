@@ -7,7 +7,9 @@ output: html_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
-
+library(dplyr)
+library(brms)
+library(rethinking)
 ```
 
 ```{r}
@@ -16,7 +18,7 @@ library(tidyverse)
 
 knitr::opts_chunk$set(echo = TRUE)
 
-df = read_csv("/Users/al/RStudio/Semester 4/Computational modeling for CogSci/EXAM/doi_10/HerrmannThoeniGaechter/HerrmannThoeniGaechterDATA.csv")
+df = read_csv("/Users/al/RStudio👩🏻‍💻/Semester 4/Computational modeling for CogSci/EXAM/Exam/HerrmannThoeniGaechterDATA.csv")
 
 #Deleting weird NA rows
 df <- df[-c(1, 2), ]
@@ -25,8 +27,182 @@ df <- df[-c(1, 2), ]
 names(df) <- as.matrix(df[1, ])
 df <- df[-1, ]
 df[] <- lapply(df, function(x) type.convert(as.character(x)))
-df
+
+```
+
+
+```{r}
+
+#Creating column overall contribution with mean values
+
+df2 <- df %>%                                        # Specify data frame
+  group_by(subjectid, p) %>%                         # Specify group indicator
+  summarise_at(vars(senderscontribution),              # Specify column
+               list(overall_contr = mean))                # Specify function
+
+df <- merge(x=df, y= df2, by.x= c("subjectid", "p"), by.y = c("subjectid", "p"))
+
+```
+
+
+```{r}
+
+#Creating a new dataset with only the variables we will use
+
+df <- subset(df, period = 1, select=c(subjectid, groupid, female, period, senderscontribution, otherscontribution, overall_contr, p, city, punishment, recpun, numknown))
+data <- subset(df, period = 1, select=c(subjectid, GEI, groupid, female, overall_contr, city))
+
+```
+
+```{r}
+
+#CREATING A COLUMN FOR GEI VALUES
+
+#Checking how many different cities are there in the experiment
+unique(df[c("city", "GEI")])
+
+#Creating column for GEI with NAs
+df$GEI <- c(NA)
+
+#Mutating GEI column to add GEI values for all countries depending on city column 
+df <- df %>% mutate(GEI =
+                  case_when(city== "Samara" ~ 76,
+                           city== "Minsk" ~ 66,
+                           city== "Boston" ~ 75,
+                           city== "Muscat"~ 48,
+                           city== "St. Gallen"~ 63,
+                           city== "Copenhagen"~ 80,
+                           city== "Nottingham"~ 75,
+                           city== "Zurich"~ 63,
+                           city== "Dnipropetrovs'k"~ 74,
+                           city== "Riyadh"~ 47,
+                           city== "Istanbul"~ 46,
+                           city== "Chengdu"~ 69,
+                           city== "Seoul"~ 54,
+                           city== "Bonn"~ 80,
+                           city== "Athens"~ 66,
+                           city== "Melbourne"~ 76,
+                           ))
+
+#Removing all the duplicate rows of the columns that are selected in the `summarise`
+data <- data %>%
+  group_by(subjectid) %>%
+  summarise(female=female, overall_contr=overall_contr, city=city, GEI=GEI, subjectid=subjectid,groupid=groupid)
+```
+
+  ##### BAYESIAN WORKFLOW #####
+
+```{r}
+#Standardizing variables to make priors easier to choose
+
+df= df %>% mutate(
+  overall_contr_st = standardize(overall_contr),
+  GEI_st = standardize(GEI)
+)
+ 
+```
+
+  
+```{r}
+###MODELS
+
+#We use a 1 because we want to compare between genders, whereas a 0 would give us each distribution separately
+
+#Th effect of GEI in a person depends on gender. If you are woman a high gei will affect you negatively while if you are a man it will affect you positively (priviledge wise)
+
+  #MODEL 1
+m0 <- bf(overall_contr ~ 0 + female + female*GEI + (1| subjectid))
+m1 = bf(overall_contr_st ~ 0 + female +(1|subjectid)+(1|GEI_st))
+m2 <- overall_contr ~ GEI*female + (1 | groupid:subjectid) + (1 | subjectid)
+
+#Priors
+get_prior(m1, family = gaussian, data = df)
+
+#priorOverContrGenderGEI <-c(
+#prior(normal(173, 1), class = b, coef = overall_contr),
+#prior(normal(3, 1), class = b, coef = female0),
+#prior(normal(-3, 1), class = b, coef = female1),
+#prior(normal(6, 2), class = sigma)
+#)
+
+prior_m0 = c(
+  prior(normal(0,1), class = b, coef = female0),
+  prior(normal(0,1), class = b, coef = female1),
+  prior(normal(0,1), class = b, coef = female0:GEI),
+  prior(normal(0,1), class = b, coef = female1:GEI),
+  prior(normal(0.3,0.4), class = sd, group = subjectid),
+  prior(normal(1,0.5), class = sigma)
+)
+prior_m1 = c(
+  prior(normal(0,1), class = b, coef = female0),
+  prior(normal(0,1), class = b, coef = female1),
+  prior(normal(0,0.2), class = sd, group = subjectid),
+  prior(normal(0,0.2), class = sd, group = GEI_st),
+  prior(normal(1,1), class = sigma)
+)
+
+prior_m2 = c(
+  prior(normal(0,1), class = b, coef = female0),
+  prior(normal(0,1), class = b, coef = female1),
+  prior(normal(0,1), class = b, coef = female0:GEI),
+  prior(normal(0,1), class = b, coef = female1:GEI),
+  prior(normal(0.3,0.4), class = sd, group = groupid:subjectid),
+  prior(normal(0.3,0.4), class = sd, group = subjectid),
+  prior(normal(1,0.5), class = sigma)
+)
+
+
+
+m0_prior = brm(
+  fom,
+  m,
+  family = gaussian(),
+  prior = prior_fom,
+  sample_prior = "only")
+
+m1_prior = brm(
+  fom,
+  m,
+  family = gaussian(),
+  prior = prior_fom,
+  sample_prior = "only")
+
+m2_prior = brm(
+  fom,
+  m,
+  family = gaussian(),
+  prior = prior_fom,
+  sample_prior = "only")
+  
+#idk what is this?? 
+#priorm1_priorCheck <- brm(m1,df,family=gaussian,prior = prior_m1,sample_prior= "only")
+
+#Doing prior predictive check    
+
+pp_check(m0_prior, nsamples = 100)
+pp_check(m1_prior, nsamples = 100)
+pp_check(m2_prior, nsamples = 100)
+
+#Checking trace and rank plots
+mcmc_trace(meta_model, pars = "b_Intercept")
+mcmc_rank_overlay(meta_model, pars = "b_Intercept")
+
+#Posterior
+posterior <- posterior_samples(meta_model)
+
+#Plotting GEI with overall contribution to see if there is a pattern
+
+ggplot(posterior1)+ geom_density(aes(female), fill="red", alpha = .3)+
+  geom_density(aes(m1_prior), fill = "blue", alpha = .5)+theme_classic()+xlab("B - Prior/posterior")
+
+ggplot(df, aes(x=GEI, y=overall_contr, color=female))+
+  geom_count()
+ 
+ggplot(df, aes(x=GEI, y=overall_contr, fill = female))+
+  geom_bar(stat='summary', fun.y = mean, width = 0.5)
+
 
 
 ```
+
 
