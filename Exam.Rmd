@@ -1,7 +1,7 @@
 ---
 title: "Assignment 3- Compmod + Sockult exam"
-author: "Alba"
-date: "4/20/2021"
+author: "Alba Gonzalez Herrero and Astrid Kjær Olling"
+date: "5/17/2021"
 output: html_document
 ---
 
